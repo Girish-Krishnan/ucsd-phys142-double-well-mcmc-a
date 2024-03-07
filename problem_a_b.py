@@ -7,7 +7,7 @@ SWEEPS = 20_000
 H = 1
 OMEGA = 1
 M = 1
-TAU = 300
+TAU = 1000
 DELTATAU = 1
 NTAU = int(TAU/DELTATAU)
 HITSIZE = 0.1
@@ -75,7 +75,7 @@ for sweep in tqdm(range(SWEEPS), desc='MCMC Sweeps'):
     MCMC(x_path, prob_histogram, M, OMEGA, DELTATAU, ALPHA, HITSIZE, XLOW, XHIGH, NXBINS)
 
 # Normalize the probability histogram
-prob_histogram_normalized = prob_histogram / (SWEEPS * DELTAX)
+prob_histogram_normalized = prob_histogram / np.sum(prob_histogram) / DELTAX
 
 # Plotting the probability distribution
 plt.figure(figsize=(10, 6))
@@ -96,15 +96,5 @@ for i in range(NTAU):
 E /= NTAU
 print(f'Ground state energy: {E:.3f}')
 
-# Also, calculate the analytical ground state probability distribution
-x = np.linspace(XLOW, XHIGH, 1000)
-V = V_double_well(x, ALPHA)
-P_analytical = np.exp(-2 * V)
-P_analytical /= np.trapz(P_analytical, x)
-plt.figure(figsize=(10, 6))
-plt.plot(x, P_analytical, label='Analytical Double Well')
-plt.title('Analytical Probability Distribution for Double Well')
-plt.xlabel('x position')
-plt.ylabel('Probability density')
-plt.legend()
-plt.show()
+# Also, calculate the expected ground state probability distribution
+# Using the formula for the ground state wavefunction of the harmonic oscillator
