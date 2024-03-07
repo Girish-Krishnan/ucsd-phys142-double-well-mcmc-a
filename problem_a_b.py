@@ -95,3 +95,16 @@ for i in range(NTAU):
 
 E /= NTAU
 print(f'Ground state energy: {E:.3f}')
+
+# Also, calculate the analytical ground state probability distribution
+x = np.linspace(XLOW, XHIGH, 1000)
+V = V_double_well(x, ALPHA)
+P_analytical = np.exp(-2 * V)
+P_analytical /= np.trapz(P_analytical, x)
+plt.figure(figsize=(10, 6))
+plt.plot(x, P_analytical, label='Analytical Double Well')
+plt.title('Analytical Probability Distribution for Double Well')
+plt.xlabel('x position')
+plt.ylabel('Probability density')
+plt.legend()
+plt.show()
