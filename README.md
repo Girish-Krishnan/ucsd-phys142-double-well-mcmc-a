@@ -1,6 +1,6 @@
-#<center>Final Project: Double Well Potential MCMC (Team A)</center>
-###<center>PHYS 142/242: Computational Physics II: Partial Differential Equations and Matrix Models</center>
-####<center>UC San Diego, Winter 2024</center>
+# Final Project: Double Well Potential MCMC (Team A)
+### PHYS 142/242: Computational Physics II: Partial Differential Equations and Matrix Models
+#### UC San Diego, Winter 2024
 
 <hr>
 
