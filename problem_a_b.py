@@ -23,12 +23,9 @@ DELTAX = (XHIGH - XLOW) / NXBINS
 prob_histogram = np.zeros(NXBINS)
 x_bins = np.linspace(XLOW, XHIGH, NXBINS + 1)
 
-x_path = np.zeros(NTAU)
-
-# Instead of doing initialization with zeros, let's initialize randomly with either 1/alpha or -1/alpha
-#x_path = np.random.choice([-1/ALPHA, 1/ALPHA], NTAU)
-
-x_path = np.random.uniform(XLOW, XHIGH, NTAU)
+#x_path = np.zeros(NTAU)
+# Instead of doing initialization with zeros, let's initialize randomly with either 1/sqrt(alpha) or -1/sqrt(alpha)
+x_path = np.random.choice([-1/np.sqrt(ALPHA), 1/np.sqrt(ALPHA)], NTAU)
 
 @numba.jit
 def V_double_well(x, alpha):
@@ -68,23 +65,34 @@ def delta_action(x_path, x_prime, i, m, delta_tau, alpha):
     return S_new - S_old
 
 @numba.jit
-def MCMC(x_path, m, delta_tau, alpha, hit_size, xlow, xhigh, nxbins):
+def total_action(x_path, m, delta_tau, alpha):
+    """
+    Computes the total action for the entire path.
+    """
+    path_action = 0
+    for i in range(-1, NXBINS - 1):
+        path_action += action(x_path[i], x_path[i+1], m, delta_tau, alpha)
+
+    return path_action
+
+@numba.jit
+def MCMC(x_path, m, delta_tau, alpha, hit_size, xlow, xhigh):
     """
     Performs a single sweep of the Metropolis-Hastings algorithm over all time slices of the path.
     """
     for i in range(NTAU):
         x_prime = vary_path(x_path[i], hit_size, xlow, xhigh)
         dS = delta_action(x_path, x_prime, i, m, delta_tau, alpha)
-        if dS <= 0 or np.random.rand() < np.exp(-dS):
+        if dS <= 0 or (np.random.random() < np.exp(-dS)):
             x_path[i] = x_prime
     
     # Update the histogram of the path positions
-    hist, _ = np.histogram(x_path, bins=nxbins, range=(xlow, xhigh))
+    hist, _ = np.histogram(x_path, bins=x_bins)
     return hist
 
 # Running the MCMC simulation
 for sweep in tqdm(range(SWEEPS), desc='MCMC Sweeps'):
-    hist = MCMC(x_path, M, DELTATAU, ALPHA, HITSIZE, XLOW, XHIGH, NXBINS)
+    hist = MCMC(x_path, M, DELTATAU, ALPHA, HITSIZE, XLOW, XHIGH)
     if sweep > BURNIN:
         prob_histogram += hist
 
@@ -114,18 +122,10 @@ E /= NTAU
 print(f'Ground state energy: {E:.3f}')
 
 # Using assignment 3 to find the expected ground state
-OMEGA = 1
 BOXSIZE = 8
 ND = 600
-DELTAT = np.pi / 128
 DELTAX = BOXSIZE / ND
-HBAR = 1
-ALPHA = 0.4
-
 x = np.linspace(-BOXSIZE / 2, BOXSIZE / 2, ND + 1)
-
-def V(x):
-    return ALPHA*x**4 - 2*x**2 + 1/ALPHA
 
 H = np.zeros((ND + 1, ND + 1))
 
@@ -134,23 +134,13 @@ for i in range(ND + 1):
         # kinetic part
         H[i, j] = -(0.5 / DELTAX**2) * ((i + 1 == j) - 2 * (i == j) + (i - 1 == j)) 
         # potential part
-        H[i, j] += V(x[i]) * (i == j)
+        H[i, j] += V_double_well(x[i], ALPHA) * (i == j)
 
 # print the first 4x4 elements of H
 print(H[:4,:4])
 
-def power_method(H, sigma, n_iter):
-    Hms_inv = scipy.linalg.inv(H - sigma*np.eye(ND + 1))
-    u = np.random.random(size=(ND + 1))
-    lambda_u = np.dot(u.conjugate(), H @ u) / np.dot(u.conjugate(), u)
-    for _ in range(n_iter):
-        u = Hms_inv @ u
-        u /= np.sqrt(np.dot(u.conjugate(),  u) * DELTAX)
-        lambda_u = np.dot(u.conjugate(), H @ u) / np.dot(u.conjugate(), u)
-    return lambda_u, u
-    
-E_0, psi_0 = power_method(H, 1.2, 100)
-E_1, psi_1 = power_method(H, 1.4, 100)
+Es, psis = scipy.linalg.eigh(H)
+psi_0 = psis[:, 0]
 
 # Find the ground state probability distribution
 prob = np.abs(psi_0)**2
@@ -160,6 +150,9 @@ prob /= np.sum(prob) * DELTAX
 plt.figure(figsize=(10, 6))
 plt.stairs(prob_histogram_normalized, x_bins, label='MCMC for Double Well')
 plt.plot(x, prob, label='Expected')
+# Plot vertical lines at +/- 1/alpha to show the peaks
+plt.axvline(-1/np.sqrt(ALPHA), color='r', linestyle='--', label='Expected Peaks')
+plt.axvline(1/np.sqrt(ALPHA), color='r', linestyle='--')
 plt.title('Ground State Probability Distribution')
 plt.xlabel('x position')
 plt.ylabel('Probability density')
