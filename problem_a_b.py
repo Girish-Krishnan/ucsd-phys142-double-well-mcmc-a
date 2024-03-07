@@ -1,16 +1,19 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import scipy
+import numba # to accelerate the code
 
 # Constants given in the problem
-SWEEPS = 20_000
+SWEEPS = 30_000
 H = 1
 M = 1
-TAU = 30
+TAU = 50000
 DELTATAU = 1
 NTAU = int(TAU/DELTATAU)
 HITSIZE = 0.1
 ALPHA = 0.4  # Alpha for the double well potential
+BURNIN = 5000
 
 # Range for x values
 XLOW = -4
@@ -22,12 +25,19 @@ x_bins = np.linspace(XLOW, XHIGH, NXBINS + 1)
 
 x_path = np.zeros(NTAU)
 
+# Instead of doing initialization with zeros, let's initialize randomly with either 1/alpha or -1/alpha
+#x_path = np.random.choice([-1/ALPHA, 1/ALPHA], NTAU)
+
+x_path = np.random.uniform(XLOW, XHIGH, NTAU)
+
+@numba.jit
 def V_double_well(x, alpha):
     """
     Double well potential function V(x) = alpha * x^4 - 2 * x^2 + 1/alpha
     """
     return alpha * x**4 - 2 * x**2 + 1/alpha
 
+@numba.jit
 def vary_path(x_current, hit_size, xlow, xhigh):
     """
     Proposes a new path by varying the current path within the range of [xlow, xhigh].
@@ -37,6 +47,7 @@ def vary_path(x_current, hit_size, xlow, xhigh):
         x_prime = x_current + np.random.uniform(-hit_size, hit_size)
     return x_prime
 
+@numba.jit
 def action(x_left, x_right, m, delta_tau, alpha):
     """
     Computes the action for a given slice of the path.
@@ -45,17 +56,19 @@ def action(x_left, x_right, m, delta_tau, alpha):
     potential_term = V_double_well(0.5 * (x_left + x_right), alpha)
     return delta_tau * (kinetic_term + potential_term)
 
+@numba.jit
 def delta_action(x_path, x_prime, i, m, delta_tau, alpha):
     """
     Computes the change in action delta S for a proposed path change at position i.
     """
     x_left = x_path[i-1]
     x_right = x_path[(i+1) % NTAU]  # Using modulo for periodic boundary condition
-    S_old = action(x_left, x_right, m, delta_tau, alpha) + action(x_path[i], x_right, m, delta_tau, alpha)
+    S_old = action(x_left, x_path[i], m, delta_tau, alpha) + action(x_path[i], x_right, m, delta_tau, alpha)
     S_new = action(x_left, x_prime, m, delta_tau, alpha) + action(x_prime, x_right, m, delta_tau, alpha)
     return S_new - S_old
 
-def MCMC(x_path, prob_histogram, m, delta_tau, alpha, hit_size, xlow, xhigh, nxbins):
+@numba.jit
+def MCMC(x_path, m, delta_tau, alpha, hit_size, xlow, xhigh, nxbins):
     """
     Performs a single sweep of the Metropolis-Hastings algorithm over all time slices of the path.
     """
@@ -67,11 +80,13 @@ def MCMC(x_path, prob_histogram, m, delta_tau, alpha, hit_size, xlow, xhigh, nxb
     
     # Update the histogram of the path positions
     hist, _ = np.histogram(x_path, bins=nxbins, range=(xlow, xhigh))
-    prob_histogram += hist
+    return hist
 
 # Running the MCMC simulation
 for sweep in tqdm(range(SWEEPS), desc='MCMC Sweeps'):
-    MCMC(x_path, prob_histogram, M, DELTATAU, ALPHA, HITSIZE, XLOW, XHIGH, NXBINS)
+    hist = MCMC(x_path, M, DELTATAU, ALPHA, HITSIZE, XLOW, XHIGH, NXBINS)
+    if sweep > BURNIN:
+        prob_histogram += hist
 
 # Normalize the probability histogram
 prob_histogram_normalized = prob_histogram / np.sum(prob_histogram) / DELTAX
@@ -124,7 +139,6 @@ for i in range(ND + 1):
 # print the first 4x4 elements of H
 print(H[:4,:4])
 
-import scipy
 def power_method(H, sigma, n_iter):
     Hms_inv = scipy.linalg.inv(H - sigma*np.eye(ND + 1))
     u = np.random.random(size=(ND + 1))
