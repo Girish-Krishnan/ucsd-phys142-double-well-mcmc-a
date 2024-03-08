@@ -65,12 +65,12 @@ def delta_action(x_path, x_prime, i, m, delta_tau, alpha):
     return S_new - S_old
 
 @numba.jit
-def total_action(x_path, m, delta_tau, alpha):
+def total_action(x_path, m, delta_tau, alpha, nx_bins):
     """
     Computes the total action for the entire path.
     """
     path_action = 0
-    for i in range(-1, NXBINS - 1):
+    for i in range(-1, nx_bins - 1):
         path_action += action(x_path[i], x_path[i+1], m, delta_tau, alpha)
 
     return path_action
@@ -111,15 +111,22 @@ plt.ylabel('Probability density')
 plt.legend()
 plt.show()
 
-# Evaluate the corresponding ground state energy
-E = 0
-for i in range(NTAU):
-    x_left = x_path[i-1]
-    x_right = x_path[(i+1) % NTAU]
-    E += 0.5 * M * ((x_path[i] - x_left) / DELTATAU)**2 + V_double_well(0.5 * (x_left + x_path[i]), ALPHA)
+# Evaluate the corresponding ground state energy from the resulting probability distribution
+H = np.zeros((NXBINS + 1, NXBINS + 1))
+for i in range(NXBINS + 1):
+    for j in range(NXBINS + 1):
+        # kinetic part
+        H[i, j] = -(0.5 / DELTAX**2) * ((i + 1 == j) - 2 * (i == j) + (i - 1 == j)) 
+        # potential part
+        H[i, j] += V_double_well(x_bins[i], ALPHA) * (i == j)
 
-E /= NTAU
-print(f'Ground state energy: {E:.3f}')
+Es, psis = scipy.linalg.eig(H)
+idx = np.argsort(Es)
+Es = Es[idx]
+psis = psis[:, idx]
+E_ground = np.real(Es[0]) # Ground state energy
+
+print(f'Ground state energy: {E_ground:.3f}')
 
 # Using assignment 3 to find the expected ground state
 BOXSIZE = 8
@@ -139,7 +146,10 @@ for i in range(ND + 1):
 # print the first 4x4 elements of H
 print(H[:4,:4])
 
-Es, psis = scipy.linalg.eigh(H)
+Es, psis = scipy.linalg.eig(H)
+idx = np.argsort(Es)
+Es = Es[idx]
+psis = psis[:, idx]
 psi_0 = psis[:, 0]
 
 # Find the ground state probability distribution
