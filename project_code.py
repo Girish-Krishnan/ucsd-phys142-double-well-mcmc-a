@@ -8,7 +8,7 @@ import numba # to accelerate the code
 SWEEPS = 30_000
 H = 1
 M = 1
-TAU = 50000
+TAU = 30000
 DELTATAU = 1
 NTAU = int(TAU/DELTATAU)
 HITSIZE = 0.1
@@ -111,21 +111,34 @@ plt.ylabel('Probability density')
 plt.legend()
 plt.show()
 
+@numba.jit
+def Hamiltonian(nx_bins, x_bins, delta_x, alpha):
+    """
+    Returns the H matrix for the Hamiltonian.
+    """
+    H = np.zeros((nx_bins + 1, nx_bins + 1))
+    for i in range(nx_bins + 1):
+        for j in range(nx_bins + 1):
+            # kinetic part
+            H[i, j] = -(0.5 / delta_x**2) * ((i + 1 == j) - 2 * (i == j) + (i - 1 == j)) 
+            # potential part
+            H[i, j] += V_double_well(x_bins[i], alpha) * (i == j)
+
+    return H
+
+def ground_state(H):
+    """
+    Returns the ground state energy and wave function.
+    """
+    Es, psis = scipy.linalg.eig(H)
+    idx = np.argsort(Es)
+    Es = Es[idx]
+    psis = psis[:, idx]
+    return np.real(Es[0]), psis[:, 0]
+
 # Evaluate the corresponding ground state energy from the resulting probability distribution
-H = np.zeros((NXBINS + 1, NXBINS + 1))
-for i in range(NXBINS + 1):
-    for j in range(NXBINS + 1):
-        # kinetic part
-        H[i, j] = -(0.5 / DELTAX**2) * ((i + 1 == j) - 2 * (i == j) + (i - 1 == j)) 
-        # potential part
-        H[i, j] += V_double_well(x_bins[i], ALPHA) * (i == j)
-
-Es, psis = scipy.linalg.eig(H)
-idx = np.argsort(Es)
-Es = Es[idx]
-psis = psis[:, idx]
-E_ground = np.real(Es[0]) # Ground state energy
-
+H = Hamiltonian(NXBINS, x_bins, DELTAX, ALPHA)
+E_ground, psi_0 = ground_state(H)
 print(f'Ground state energy: {E_ground:.3f}')
 
 # Using assignment 3 to find the expected ground state
@@ -134,24 +147,11 @@ ND = 600
 DELTAX = BOXSIZE / ND
 x = np.linspace(-BOXSIZE / 2, BOXSIZE / 2, ND + 1)
 
-H = np.zeros((ND + 1, ND + 1))
-
-for i in range(ND + 1):
-    for j in range(ND + 1):
-        # kinetic part
-        H[i, j] = -(0.5 / DELTAX**2) * ((i + 1 == j) - 2 * (i == j) + (i - 1 == j)) 
-        # potential part
-        H[i, j] += V_double_well(x[i], ALPHA) * (i == j)
-
+H = Hamiltonian(ND, x, DELTAX, ALPHA)
 # print the first 4x4 elements of H
 print(H[:4,:4])
 
-Es, psis = scipy.linalg.eig(H)
-idx = np.argsort(Es)
-Es = Es[idx]
-psis = psis[:, idx]
-psi_0 = psis[:, 0]
-
+E_ground, psi_0 = ground_state(H)
 # Find the ground state probability distribution
 prob = np.abs(psi_0)**2
 prob /= np.sum(prob) * DELTAX
