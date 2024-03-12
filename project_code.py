@@ -54,12 +54,12 @@ def action(x_left, x_right, m, delta_tau, alpha):
     return delta_tau * (kinetic_term + potential_term)
 
 @numba.jit
-def delta_action(x_path, x_prime, i, m, delta_tau, alpha):
+def delta_action(x_path, x_prime, i, m, delta_tau, alpha, n_tau):
     """
     Computes the change in action delta S for a proposed path change at position i.
     """
     x_left = x_path[i-1]
-    x_right = x_path[(i+1) % NTAU]  # Using modulo for periodic boundary condition
+    x_right = x_path[(i+1) % n_tau]  # Using modulo for periodic boundary condition
     S_old = action(x_left, x_path[i], m, delta_tau, alpha) + action(x_path[i], x_right, m, delta_tau, alpha)
     S_new = action(x_left, x_prime, m, delta_tau, alpha) + action(x_prime, x_right, m, delta_tau, alpha)
     return S_new - S_old
@@ -76,13 +76,13 @@ def total_action(x_path, m, delta_tau, alpha, nx_bins):
     return path_action
 
 @numba.jit
-def MCMC(x_path, m, delta_tau, alpha, hit_size, xlow, xhigh):
+def MCMC(x_path, m, delta_tau, alpha, hit_size, xlow, xhigh, n_tau):
     """
     Performs a single sweep of the Metropolis-Hastings algorithm over all time slices of the path.
     """
-    for i in range(NTAU):
+    for i in range(n_tau):
         x_prime = vary_path(x_path[i], hit_size, xlow, xhigh)
-        dS = delta_action(x_path, x_prime, i, m, delta_tau, alpha)
+        dS = delta_action(x_path, x_prime, i, m, delta_tau, alpha, n_tau)
         if dS <= 0 or (np.random.random() < np.exp(-dS)):
             x_path[i] = x_prime
     
@@ -106,12 +106,12 @@ def Hamiltonian(nx_bins, x_bins, delta_x, alpha):
     return H
 
 @numba.jit
-def ground_state_energy(H, prob_histogram_normalized, delta_x):
+def ground_state_energy(prob_histogram_normalized, delta_x, alpha):
     """
     Returns the ground state energy from the Hamiltonian and the probability distribution.
     """
-    K = np.real((1 / 2)*np.sum(DELTAX * np.diff(np.sqrt(prob_histogram_normalized))*np.diff(np.sqrt(prob_histogram_normalized)) / DELTAX**2))
-    V = np.sum(prob_histogram_normalized * V_double_well(x_bins[:-1], ALPHA)) * DELTAX
+    K = np.real((1 / 2)*np.sum(delta_x * np.diff(np.sqrt(prob_histogram_normalized))*np.diff(np.sqrt(prob_histogram_normalized)) / delta_x**2))
+    V = np.sum(prob_histogram_normalized * V_double_well(x_bins[:-1], alpha)) * delta_x
     return K + V
 
 # Running the MCMC simulation
@@ -121,7 +121,7 @@ hists = []
 energy_calculation_interval = 100 # Calculate the ground state energy every 100 sweeps
 
 for sweep in tqdm(range(SWEEPS), desc='MCMC Sweeps'):
-    hist = MCMC(x_path, M, DELTATAU, ALPHA, HITSIZE, XLOW, XHIGH)
+    hist = MCMC(x_path, M, DELTATAU, ALPHA, HITSIZE, XLOW, XHIGH, NTAU)
     if sweep % THINNING == 0:
         prob_histogram += hist
         hists.append(hist)
@@ -129,7 +129,7 @@ for sweep in tqdm(range(SWEEPS), desc='MCMC Sweeps'):
         if sweep % energy_calculation_interval == 0 and sweep != 0: # Calculate the ground state energy every energy_calculation_interval sweeps
             prob_histogram_normalized = prob_histogram / np.sum(prob_histogram) / DELTAX
             H = Hamiltonian(NXBINS, x_bins, DELTAX, ALPHA)
-            energy_values.append(ground_state_energy(H, prob_histogram_normalized, DELTAX))
+            energy_values.append(ground_state_energy(prob_histogram_normalized, DELTAX, ALPHA))
             action_values.append(total_action(x_path, M, DELTATAU, ALPHA, NXBINS))
 
 # Take only the values after burn-in
@@ -230,7 +230,7 @@ plt.show()
 
 # Now, make a class for the MCMC simulation that allows for easy parameter changes and multiple runs
 class DoubleWellMCMC:
-    def __init__(self, sweeps, m, delta_tau, alpha, hit_size, xlow, xhigh, burnin, thinning, energy_calculation_interval, num_walkers, num_repeats):
+    def __init__(self, sweeps, m, delta_tau, alpha, hit_size, xlow, xhigh, burnin, thinning, energy_calculation_interval, ntau, nxbins, deltax):
         self.sweeps = sweeps
         self.m = m
         self.delta_tau = delta_tau
@@ -241,43 +241,41 @@ class DoubleWellMCMC:
         self.burnin = burnin
         self.thinning = thinning
         self.energy_calculation_interval = energy_calculation_interval
-        self.num_walkers = num_walkers
-        self.num_repeats = num_repeats
+        self.ntau = ntau
+        self.nxbins = nxbins
+        self.deltax = deltax
 
     def run(self):
-        prob_histograms = []
+        # Initialize the path
+        x_path = np.random.choice([-1/np.sqrt(self.alpha), 1/np.sqrt(self.alpha)], self.ntau)
+
+        # Running the MCMC simulation
         energy_values = []
         action_values = []
-
-        for repeat in range(self.num_repeats):
-            prob_histogram = np.zeros(NXBINS)
-            x_paths = np.random.choice([-1/np.sqrt(self.alpha), 1/np.sqrt(self.alpha)], (self.num_walkers, NTAU))
-
-            for sweep in tqdm(range(self.sweeps), desc=f'MCMC Sweeps (Repeat {repeat+1}/{self.num_repeats})'):
-                hists = []
-                for walker in range(self.num_walkers):
-                    hist = MCMC(x_paths[walker], self.m, self.delta_tau, self.alpha, self.hit_size, self.xlow, self.xhigh)
-                    if sweep % self.thinning == 0:
-                        prob_histogram += hist
-                        hists.append(hist)
+        hists = []
+        prob_histogram = np.zeros(self.nxbins)
+        for sweep in tqdm(range(self.sweeps), desc='MCMC Sweeps'):
+            #print(f"Running sweep {sweep} / {self.sweeps}...", end='\r')
+            hist = MCMC(x_path, self.m, self.delta_tau, self.alpha, self.hit_size, self.xlow, self.xhigh)
+            if sweep % self.thinning == 0:
+                prob_histogram += hist
+                hists.append(hist)
 
                 if sweep % self.energy_calculation_interval == 0 and sweep != 0:
-                    prob_histogram_normalized = prob_histogram / np.sum(prob_histogram) / DELTAX
-                    H = Hamiltonian(NXBINS, x_bins, DELTAX, ALPHA)
-                    energy_values.append(ground_state_energy(H, prob_histogram_normalized, DELTAX))
-                    action_values.append(total_action(x_paths, M, DELTATAU, ALPHA, NXBINS))
+                    prob_histogram_normalized = prob_histogram / np.sum(prob_histogram) / self.deltax
+                    H = Hamiltonian(self.nxbins, x_bins, self.deltax, self.alpha)
+                    energy_values.append(ground_state_energy(H, prob_histogram_normalized, self.deltax))
+                    action_values.append(total_action(x_path, self.m, self.delta_tau, self.alpha, self.nxbins))
 
-            prob_histograms.append(np.sum(hists[self.burnin//self.thinning:], axis=0))
+        # Take only the values after burn-in
+        prob_histogram = np.sum(hists[self.burnin//self.thinning:], axis=0)
 
-        prob_histograms = np.array(prob_histograms)
-        prob_histogram_normalized = np.mean(prob_histograms, axis=0) / np.sum(np.mean(prob_histograms, axis=0)) / DELTAX
+        # Normalize the probability histogram
+        prob_histogram_normalized = prob_histogram / np.sum(prob_histogram) / self.deltax
 
-        E_ground = np.sum(np.sqrt(prob_histogram_normalized) @ H[:-1, :-1] @ np.sqrt(prob_histogram_normalized)) * DELTAX
-        print("Ground state energy from MCMC simulation:", E_ground)
-
-        return prob_histogram_normalized, energy_values, action_values, prob_histograms
+        return prob_histogram_normalized, energy_values, action_values
     
-    def plot_histogram(self, prob_histogram_normalized):
+    def plot_prob_distribution(self, prob_histogram_normalized):
         plt.figure(figsize=(10, 6))
         plt.stairs(prob_histogram_normalized, x_bins, label='MCMC for Double Well')
         plt.title('Probability Distribution from MCMC Simulation')
@@ -308,14 +306,9 @@ class DoubleWellMCMC:
         plt.legend()
         plt.show()
 
-    def plot_histogram_variation(self, prob_histograms):
-        plt.figure(figsize=(10, 6))
-        for i in range(self.num_repeats):
-            plt.stairs(prob_histograms[i] / np.sum(prob_histograms[i]) / DELTAX, x_bins, alpha=0.5, label=f'Walk {i+1}')
-        plt.title('Variation in Probability Distribution for Multiple Walks')
-        plt.xlabel('x position')
-        plt.ylabel('Probability density')
-        plt.legend()
-        plt.show()
 
 # Run the MCMC simulation with the class
+# TAU_NEW = 300
+# NTAU_NEW = int(TAU_NEW/DELTATAU)
+# mcmc = DoubleWellMCMC(SWEEPS, M, DELTATAU, ALPHA, HITSIZE, XLOW, XHIGH, BURNIN, THINNING, energy_calculation_interval, NTAU_NEW, NXBINS, DELTAX)
+# prob_histogram_normalized, energy_values, action_values = mcmc.run()
