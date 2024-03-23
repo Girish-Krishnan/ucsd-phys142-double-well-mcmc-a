@@ -2,6 +2,8 @@
 ### PHYS 142/242: Computational Physics II: Partial Differential Equations and Matrix Models
 #### UC San Diego, Winter 2024
 
+![](mcmc_double_well.gif)
+
 <hr>
 
 ### Team Members
